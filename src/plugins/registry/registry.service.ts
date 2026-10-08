@@ -4,6 +4,7 @@
 import { Tool } from '../../core/Tool.decorator.js';
 import type { StellarClient, ToolResult } from '../../core/index.js';
 import type * as P from './parameters.js';
+import { parseConstructorArgs } from './constructor-args.js';
 import { REGISTRY_CONTRACT } from '../../registry/contracts.js';
 import {
   executeCommandSimple,
@@ -22,7 +23,7 @@ export class RegistryService {
         error:
           'Stellar CLI not found. Please install it first:\n\n' +
           'macOS: brew install stellar-cli\n' +
-          'Linux: curl --proto \'=https\' --tlsv1.2 -sSf https://sh.stellar.org | sh\n' +
+          "Linux: curl --proto '=https' --tlsv1.2 -sSf https://sh.stellar.org | sh\n" +
           'Windows: winget install --id Stellar.StellarCLI --source winget\n' +
           'Or: cargo install --locked stellar-cli --features opt',
       };
@@ -56,7 +57,10 @@ export class RegistryService {
       'Publish a compiled contract to the Stellar Registry. This makes the contract ' +
       'available for deployment. The registry tracks versions and metadata for published contracts.',
   })
-  async publish(sc: StellarClient, p: P.PublishParams): Promise<ToolResult<{ published: boolean; output: string }>> {
+  async publish(
+    sc: StellarClient,
+    p: P.PublishParams,
+  ): Promise<ToolResult<{ published: boolean; output: string }>> {
     try {
       // Check if registry CLI is available
       const cliCheck = this.checkRegistryCLI();
@@ -64,27 +68,26 @@ export class RegistryService {
         return { success: false, error: cliCheck.error };
       }
 
-      // Build the publish command
-      let cmd = `stellar registry publish --wasm "${p.wasm_path}"`;
+      const args = ['registry', 'publish', '--wasm', p.wasm_path];
 
       if (p.wasm_name) {
-        cmd += ` --wasm-name "${p.wasm_name}"`;
+        args.push('--wasm-name', p.wasm_name);
       }
 
       if (p.version) {
-        cmd += ` --binver "${p.version}"`;
+        args.push('--binver', p.version);
       }
 
       if (p.author) {
-        cmd += ` --author "${p.author}"`;
+        args.push('--author', p.author);
       }
 
       if (p.dry_run) {
-        cmd += ' --dry-run';
+        args.push('--dry-run');
       }
 
       // Execute the command
-      const output = executeCommandSimple(cmd, {
+      const output = executeCommandSimple('stellar', args, {
         cwd: p.working_directory,
         timeout: 60000,
       });
@@ -113,7 +116,7 @@ export class RegistryService {
   })
   async deploy(
     sc: StellarClient,
-    p: P.DeployParams
+    p: P.DeployParams,
   ): Promise<ToolResult<{ contract_id: string | null; output: string }>> {
     try {
       // Check if registry CLI is available
@@ -122,28 +125,34 @@ export class RegistryService {
         return { success: false, error: cliCheck.error };
       }
 
-      // Build the deploy command
-      let cmd = `stellar registry deploy --contract-name "${p.contract_name}" --wasm-name "${p.wasm_name}"`;
+      const args = [
+        'registry',
+        'deploy',
+        '--contract-name',
+        p.contract_name,
+        '--wasm-name',
+        p.wasm_name,
+      ];
 
       if (p.version) {
-        cmd += ` --version "${p.version}"`;
+        args.push('--version', p.version);
       }
 
       // Add constructor function and arguments if provided
       if (p.constructor_function || p.constructor_args) {
-        cmd += ' --';
+        args.push('--');
 
         if (p.constructor_function) {
-          cmd += ` ${p.constructor_function}`;
+          args.push(p.constructor_function);
         }
 
         if (p.constructor_args) {
-          cmd += ` ${p.constructor_args}`;
+          args.push(...parseConstructorArgs(p.constructor_args));
         }
       }
 
       // Execute the command
-      const output = executeCommandSimple(cmd, {
+      const output = executeCommandSimple('stellar', args, {
         cwd: p.working_directory,
         timeout: 60000,
       });
@@ -171,7 +180,10 @@ export class RegistryService {
       'Install a deployed contract as an alias to be used by stellar-cli. ' +
       'This allows you to interact with the contract using its name instead of its ID.',
   })
-  async createAlias(sc: StellarClient, p: P.CreateAliasParams): Promise<ToolResult<{ alias_created: boolean; output: string }>> {
+  async createAlias(
+    sc: StellarClient,
+    p: P.CreateAliasParams,
+  ): Promise<ToolResult<{ alias_created: boolean; output: string }>> {
     try {
       // Check if registry CLI is available
       const cliCheck = this.checkRegistryCLI();
@@ -180,10 +192,10 @@ export class RegistryService {
       }
 
       // Build the create-alias command
-      const cmd = `stellar registry create-alias ${p.contract_name}`;
+      const args = ['registry', 'create-alias', p.contract_name];
 
       // Execute the command
-      const output = executeCommandSimple(cmd, {
+      const output = executeCommandSimple('stellar', args, {
         cwd: p.working_directory,
         timeout: 60000,
       });
@@ -206,7 +218,10 @@ export class RegistryService {
     description:
       'List all published contracts in the Stellar Registry. Note: The registry contract does not support listing all published contracts directly. Use fetch_hash or current_version for specific contracts.',
   })
-  async listPublished(sc: StellarClient, p: P.ListPublishedParams): Promise<ToolResult<any>> {
+  async listPublished(
+    sc: StellarClient,
+    p: P.ListPublishedParams,
+  ): Promise<ToolResult<any>> {
     try {
       return {
         success: false,
@@ -225,12 +240,18 @@ export class RegistryService {
     description:
       'Get the current version for a specific contract in the Stellar Registry. Returns the most recent version.',
   })
-  async getVersions(sc: StellarClient, p: P.GetVersionsParams): Promise<ToolResult<string[]>> {
+  async getVersions(
+    sc: StellarClient,
+    p: P.GetVersionsParams,
+  ): Promise<ToolResult<string[]>> {
     try {
       const network = sc.getNetwork();
       // Default to testnet if registry not available on current network (e.g., local)
-      const registryAddress = REGISTRY_CONTRACT[network.name] || REGISTRY_CONTRACT['testnet'];
-      const registryNetwork = REGISTRY_CONTRACT[network.name] ? network.name : 'testnet';
+      const registryAddress =
+        REGISTRY_CONTRACT[network.name] || REGISTRY_CONTRACT['testnet'];
+      const registryNetwork = REGISTRY_CONTRACT[network.name]
+        ? network.name
+        : 'testnet';
 
       if (!registryAddress) {
         return {
@@ -246,8 +267,21 @@ export class RegistryService {
       }
 
       // Use stellar CLI to query the registry contract - use current_version function
-      const cmd = `stellar contract invoke --id ${registryAddress} --source-account ${sc.getAddress()} --network ${registryNetwork} -- current_version --wasm_name "${p.wasm_name}"`;
-      const output = executeCommandSimple(cmd, { timeout: 30000 });
+      const args = [
+        'contract',
+        'invoke',
+        '--id',
+        registryAddress,
+        '--source-account',
+        sc.getAddress(),
+        '--network',
+        registryNetwork,
+        '--',
+        'current_version',
+        '--wasm_name',
+        p.wasm_name,
+      ];
+      const output = executeCommandSimple('stellar', args, { timeout: 30000 });
 
       // Parse the output (JSON format from stellar CLI)
       const version = JSON.parse(output);
@@ -267,12 +301,18 @@ export class RegistryService {
     description:
       'Get information for a specific published contract in the Stellar Registry. Returns current version and hash.',
   })
-  async getInfo(sc: StellarClient, p: P.GetInfoParams): Promise<ToolResult<any>> {
+  async getInfo(
+    sc: StellarClient,
+    p: P.GetInfoParams,
+  ): Promise<ToolResult<any>> {
     try {
       const network = sc.getNetwork();
       // Default to testnet if registry not available on current network (e.g., local)
-      const registryAddress = REGISTRY_CONTRACT[network.name] || REGISTRY_CONTRACT['testnet'];
-      const registryNetwork = REGISTRY_CONTRACT[network.name] ? network.name : 'testnet';
+      const registryAddress =
+        REGISTRY_CONTRACT[network.name] || REGISTRY_CONTRACT['testnet'];
+      const registryNetwork = REGISTRY_CONTRACT[network.name]
+        ? network.name
+        : 'testnet';
 
       if (!registryAddress) {
         return {
@@ -288,10 +328,25 @@ export class RegistryService {
       }
 
       // Get current version
-      const versionCmd = `stellar contract invoke --id ${registryAddress} --source-account ${sc.getAddress()} --network ${registryNetwork} -- current_version --wasm_name "${p.wasm_name}"`;
+      const versionArgs = [
+        'contract',
+        'invoke',
+        '--id',
+        registryAddress,
+        '--source-account',
+        sc.getAddress(),
+        '--network',
+        registryNetwork,
+        '--',
+        'current_version',
+        '--wasm_name',
+        p.wasm_name,
+      ];
       let version: any = null;
       try {
-        const versionOutput = executeCommandSimple(versionCmd, { timeout: 30000 });
+        const versionOutput = executeCommandSimple('stellar', versionArgs, {
+          timeout: 30000,
+        });
         version = JSON.parse(versionOutput);
       } catch (e) {
         // Contract not published
@@ -302,8 +357,25 @@ export class RegistryService {
       let hash: any = null;
       if (targetVersion) {
         try {
-          const hashCmd = `stellar contract invoke --id ${registryAddress} --source-account ${sc.getAddress()} --network ${registryNetwork} -- fetch_hash --wasm_name "${p.wasm_name}" --version "${targetVersion}"`;
-          const hashOutput = executeCommandSimple(hashCmd, { timeout: 30000 });
+          const hashArgs = [
+            'contract',
+            'invoke',
+            '--id',
+            registryAddress,
+            '--source-account',
+            sc.getAddress(),
+            '--network',
+            registryNetwork,
+            '--',
+            'fetch_hash',
+            '--wasm_name',
+            p.wasm_name,
+            '--version',
+            targetVersion,
+          ];
+          const hashOutput = executeCommandSimple('stellar', hashArgs, {
+            timeout: 30000,
+          });
           hash = JSON.parse(hashOutput);
         } catch (e) {
           // Hash not found
@@ -311,8 +383,23 @@ export class RegistryService {
       } else {
         // Try without version to get latest
         try {
-          const hashCmd = `stellar contract invoke --id ${registryAddress} --source-account ${sc.getAddress()} --network ${registryNetwork} -- fetch_hash --wasm_name "${p.wasm_name}"`;
-          const hashOutput = executeCommandSimple(hashCmd, { timeout: 30000 });
+          const hashArgs = [
+            'contract',
+            'invoke',
+            '--id',
+            registryAddress,
+            '--source-account',
+            sc.getAddress(),
+            '--network',
+            registryNetwork,
+            '--',
+            'fetch_hash',
+            '--wasm_name',
+            p.wasm_name,
+          ];
+          const hashOutput = executeCommandSimple('stellar', hashArgs, {
+            timeout: 30000,
+          });
           hash = JSON.parse(hashOutput);
         } catch (e) {
           // Hash not found
